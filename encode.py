@@ -66,11 +66,6 @@ class Encode:
         self.vspipe = vspipe
         self.encoder = encoder
         self.param = param
-        fh = logging.FileHandler(f'{script.absolute()}.log', mode='a', encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        self.logger = logging.getLogger(script.name)
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.addHandler(fh)
         self.proc = None
 
     def __repr__(self):
@@ -91,6 +86,13 @@ class Encode:
         self.return_code = self.proc.wait()
         if self.return_code:
             self.logger.error(f"{cmd} failed with return code {self.return_code}")
+    
+    def _set_logger(self):
+        fh = logging.FileHandler(f'{self.output_path.name}.log', mode='a', encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        self.logger = logging.getLogger(self.output_path.name)
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.addHandler(fh)
 
     def info(self):
         cmd = f"{self.vspipe.absolute()} --info {self.script.absolute()} -"
@@ -98,13 +100,22 @@ class Encode:
         self.logger.info('\n' + out.stdout.decode('utf-8'))
 
     def run(self):
-        output_path = self.script.parents[0].joinpath(
-            f"{self.script.name[:-4]}_{self.encoder.encoder.value}_{int(time.time())}")
+        max_num = -1
+        for f in os.listdir(self.script.parents[0]):
+            if m := re.match(fr"{self.script.name[:-4]}_{self.encoder.encoder.value}_([\d]+)", f):
+                if m.group(1).isdigit() and int(m.group(1)) > max_num:
+                    max_num = int(m.group(1))
+
+        self.output_path = self.script.parents[0].joinpath(
+            f"{self.script.name[:-4]}_{self.encoder.encoder.value}_{max_num+1}")
+        
+        self._set_logger()
+        self.info()
         cmd = (f'"{self.vspipe.absolute()}" "{self.script.absolute()}" - --y4m '
                f'| "{self.encoder.executable_path.absolute()}" '
                f"{'--demuxer y4m' if self.encoder.encoder == EncoderChoice.X264 else '--y4m'} "
                f"{self.param} "
-               f"-o \"{output_path.absolute()}.{'hevc' if self.encoder.encoder == EncoderChoice.X265 else 'mkv'}\" -")
+               f"-o \"{self.output_path.absolute()}.{'hevc' if self.encoder.encoder == EncoderChoice.X265 else 'mkv'}\" -")
         self.logger.info(f"Built command: \n{cmd}")
         prev = ''
         for out in self._execute(cmd):
@@ -150,7 +161,6 @@ def encode(encodes: List[Encode]) -> defaultdict(int):
     return_codes = defaultdict(int)
     for encode in encodes:
         logger.info(f"Executing encode tasks: {encode}")
-        encode.info()
         return_codes[encode.run()] += 1
     return return_codes
 
@@ -168,28 +178,45 @@ if __name__ == '__main__':
                         help='The encoder to use for the vpy script', required=True)
     parser.add_argument('-p', '--param', action='extend', nargs='+', help='The encoder parameters for each script',
                         required=True)
+    parser.add_argument('--preset', action='extend', nargs='+', help='The preset defined in encodeconfig',
+                        required=False)
     args = parser.parse_args()
-
-    if len(args.encoder) < len(args.script):
-        args.encoder += [args.encoder[-1]] * (len(args.script) - len(args.encoder))
-    if len(args.param) < len(args.script):
-        args.param += [args.param[-1]] * (len(args.script) - len(args.param))
-
+    print(args)
+    max_len = max(len(args.encoder), len(args.script), len(args.param))
+    if len(args.script) < max_len:
+        args.script += [args.script[-1]] * (max_len - len(args.script))
+    if len(args.encoder) < max_len:
+        args.encoder += [args.encoder[-1]] * (max_len - len(args.encoder))
+    if len(args.param) < max_len:
+        args.param += [args.param[-1]] * (max_len - len(args.param))
+    if args.preset:
+        if len(args.preset) < max_len:
+            args.preset += [args.preset[-1]] * (max_len - len(args.preset))
+    else:
+        args.preset = [''] * max_len
+    print(args)
     vspipe = find_vspipe()
     if vspipe is None:
         logger.error("Cannot find vspipe, please put the executable in Path or set VSPIPEPATH")
         sys.exit(1)
 
-    scripts = list(zip(args.script, args.encoder, args.param))
+    scripts = list(zip(args.script, args.encoder, args.param, args.preset))
     encodes = []
     encoders = {}
-    for script, encoder, param in scripts:
+    for script, encoder, param, preset in scripts:
+        print(preset)
         if not os.path.isfile(script):
             logger.warning(f"Script not found! Skipping: {script}")
             continue
         elif script[-4:] != '.vpy':
             logger.warning(f"Not a Vapoursynth script! Skipping: {script}")
             continue
+        if preset:
+            import encodeconfig
+            if preset_params := encodeconfig.encoder[encoder.value]['presets'].get(preset):
+                param = preset_params + ' ' + param
+            else:
+                logger.warning(f"Not found preset {preset}")
         if encoder in encoders:
             encodes.append((Encode(Path(script), vspipe, encoders.get(encoder), param)))
         elif e := find_encoders(encoder):
