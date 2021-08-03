@@ -88,16 +88,17 @@ class Encode:
             self.logger.error(f"{cmd} failed with return code {self.return_code}")
     
     def _set_logger(self):
-        fh = logging.FileHandler(f'{self.output_path.name}.log', mode='a', encoding='utf-8')
+        fh = logging.FileHandler(f'{self.output_path.absolute()}.log', mode='a', encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         self.logger = logging.getLogger(self.output_path.name)
         self.logger.setLevel(logging.DEBUG)
         self.logger.addHandler(fh)
 
-    def info(self):
+    def _write_info(self):
         cmd = f"{self.vspipe.absolute()} --info {self.script.absolute()} -"
-        out = subprocess.run(cmd, shell=True, capture_output=True)
-        self.logger.info('\n' + out.stdout.decode('utf-8'))
+        out = subprocess.run(cmd, shell=True, capture_output=True).stdout.decode('utf-8')
+        self.logger.info('\n' + out)
+        logger.info(outß)
 
     def run(self):
         max_num = -1
@@ -110,7 +111,7 @@ class Encode:
             f"{self.script.name[:-4]}_{self.encoder.encoder.value}_{max_num+1}")
         
         self._set_logger()
-        self.info()
+        self._write_info()
         cmd = (f'"{self.vspipe.absolute()}" "{self.script.absolute()}" - --y4m '
                f'| "{self.encoder.executable_path.absolute()}" '
                f"{'--demuxer y4m' if self.encoder.encoder == EncoderChoice.X264 else '--y4m'} "
