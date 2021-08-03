@@ -69,7 +69,7 @@ class Encode:
         self.proc = None
 
     def __repr__(self):
-        return f"\nEncoder: {self.encoder.encoder}\nScript:  {self.script}\nParam:   {self.param}"
+        return f"\nEncoder: {self.encoder.encoder.name}\nScript:  {self.script}\nParam:   {self.param}"
 
     def _execute(self, cmd):
         extra_args = {}
@@ -93,12 +93,13 @@ class Encode:
         self.logger = logging.getLogger(self.output_path.name)
         self.logger.setLevel(logging.DEBUG)
         self.logger.addHandler(fh)
+        self.logger.info(str(self) + '\n')
 
     def _write_info(self):
-        cmd = f"{self.vspipe.absolute()} --info {self.script.absolute()} -"
+        cmd = f'"{self.vspipe.absolute()}" --info "{self.script.absolute()}" -'
         out = subprocess.run(cmd, shell=True, capture_output=True).stdout.decode('utf-8')
-        self.logger.info('\n' + out)
-        logger.info(outß)
+        self.logger.info(out)
+        logger.info('\n' + out)
 
     def run(self):
         max_num = -1
@@ -117,7 +118,7 @@ class Encode:
                f"{'--demuxer y4m' if self.encoder.encoder == EncoderChoice.X264 else '--y4m'} "
                f"{self.param} "
                f"-o \"{self.output_path.absolute()}.{'hevc' if self.encoder.encoder == EncoderChoice.X265 else 'mkv'}\" -")
-        self.logger.info(f"Built command: \n{cmd}")
+        self.logger.info(f"Built command: \n{cmd}\n")
         prev = ''
         for out in self._execute(cmd):
             out = out.strip()
@@ -159,16 +160,12 @@ def find_encoders(encoder: EncoderChoice):
 
 
 def encode(encodes: List[Encode]) -> defaultdict(int):
+    logger.debug(f"Queueing {len(encodes)} encode tasks: {''.join(map(lambda e: str(e), encodes))}")
     return_codes = defaultdict(int)
     for encode in encodes:
+        logger.info("\n===========================================")
         logger.info(f"Executing encode tasks: {encode}")
         return_codes[encode.run()] += 1
-    return return_codes
-
-
-def main(encodes: List[Encode]):
-    logger.debug(f"Queueing {len(encodes)} encode tasks: {''.join(map(lambda e: str(e), encodes))}")
-    return_codes = encode(encodes)
     logger.info(f"Success: {return_codes[0]}. Failed: {sum(return_codes.values()) - return_codes[0]}")
 
 
@@ -182,7 +179,7 @@ if __name__ == '__main__':
     parser.add_argument('--preset', action='extend', nargs='+', help='The preset defined in encodeconfig',
                         required=False)
     args = parser.parse_args()
-    print(args)
+
     max_len = max(len(args.encoder), len(args.script), len(args.param))
     if len(args.script) < max_len:
         args.script += [args.script[-1]] * (max_len - len(args.script))
@@ -195,7 +192,7 @@ if __name__ == '__main__':
             args.preset += [args.preset[-1]] * (max_len - len(args.preset))
     else:
         args.preset = [''] * max_len
-    print(args)
+
     vspipe = find_vspipe()
     if vspipe is None:
         logger.error("Cannot find vspipe, please put the executable in Path or set VSPIPEPATH")
@@ -227,4 +224,4 @@ if __name__ == '__main__':
     if len(encodes) <= 0:
         logger.error(f"No encode task found, aborting...")
         sys.exit(1)
-    main(encodes)
+    encode(encodes)
